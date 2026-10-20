@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-20
+
 ### Added
 
 - Initial implementation of Triagent: a CLI (and Fyne-based GUI, built
@@ -45,4 +47,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MIT license (model and onnxruntime library carry their own permissive
   licenses - see README Credits).
 
-[Unreleased]: https://github.com/gustavoaveiro/triagent/commits/master
+[Unreleased]: https://github.com/gustavoaveiro/triagent/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/gustavoaveiro/triagent/releases/tag/v0.1.0
