@@ -1,0 +1,132 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  ONNXRUNTIME_VERSION: "1.31.0"
+
+jobs:
+  build:
+    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ort_asset: onnxruntime-linux-x64
+            ort_format: tgz
+            lib_name: libonnxruntime.so
+            pkg_format: tar.gz
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            ort_asset: onnxruntime-osx-arm64
+            ort_format: tgz
+            lib_name: libonnxruntime.dylib
+            pkg_format: tar.gz
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            ort_asset: onnxruntime-win-x64
+            ort_format: zip
+            lib_name: onnxruntime.dll
+            pkg_format: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: fetch onnxruntime
+        shell: bash
+        run: |
+          set -e
+          asset="${{ matrix.ort_asset }}-${ONNXRUNTIME_VERSION}"
+          mkdir -p ort-dl dist-assets
+
+          if [ "${{ matrix.ort_format }}" = "tgz" ]; then
+            curl -sL -o ort-dl/ort.tgz "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/${asset}.tgz"
+            tar -xzf ort-dl/ort.tgz -C ort-dl
+          else
+            curl -sL -o ort-dl/ort.zip "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/${asset}.zip"
+            unzip -q ort-dl/ort.zip -d ort-dl
+          fi
+
+          case "${{ matrix.goos }}" in
+            linux)   lib_src="ort-dl/${asset}/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}" ;;
+            darwin)  lib_src="ort-dl/${asset}/lib/libonnxruntime.${ONNXRUNTIME_VERSION}.dylib" ;;
+            windows) lib_src="ort-dl/${asset}/lib/onnxruntime.dll" ;;
+          esac
+          cp "$lib_src" "dist-assets/${{ matrix.lib_name }}"
+
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            cp "ort-dl/${asset}/lib/onnxruntime_providers_shared.dll" dist-assets/onnxruntime_providers_shared.dll
+          fi
+
+      - name: fetch nsfw model
+        shell: bash
+        run: curl -sL -o dist-assets/model.onnx "https://huggingface.co/AdamCodd/vit-base-nsfw-detector/resolve/main/onnx/model_quantized.onnx"
+
+      - name: build
+        shell: bash
+        run: |
+          ext=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then ext=".exe"; fi
+          go build -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" -o "dist-assets/triagent${ext}" ./cmd/triagent
+
+      - name: package archive
+        shell: bash
+        run: |
+          set -e
+          name="triagent_${GITHUB_REF_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          mkdir -p "pkg/${name}"
+          cp dist-assets/* "pkg/${name}/"
+          cp LICENSE README.md CHANGELOG.md "pkg/${name}/"
+          cd pkg
+          if [ "${{ matrix.pkg_format }}" = "zip" ]; then
+            7z a -tzip "${name}.zip" "${name}" >/dev/null
+          else
+            tar -czf "${name}.tar.gz" "${name}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: triagent-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            pkg/*.tar.gz
+            pkg/*.zip
+          if-no-files-found: error
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: checksums
+        working-directory: artifacts
+        run: sha256sum * > checksums.txt
+
+      - name: create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            --notes "Each archive bundles the CLI binary, the nsfw-detector ONNX model, and the matching onnxruntime shared library - unzip and run, no separate install needed. macOS builds are Apple Silicon (arm64) only; GPU acceleration (CUDA/CoreML/DirectML) is attempted automatically and falls back to CPU, but is only verified on CPU-only CI runners - please report back if GPU mode works or breaks on your hardware." \
+            artifacts/*

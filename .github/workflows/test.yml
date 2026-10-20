@@ -1,0 +1,107 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  ONNXRUNTIME_VERSION: "1.31.0"
+
+jobs:
+  test:
+    name: test (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: cache ONNX test assets
+        id: cache-onnx
+        uses: actions/cache@v4
+        with:
+          path: onnx-assets
+          key: onnx-assets-${{ env.ONNXRUNTIME_VERSION }}-vit-base-nsfw-detector-quantized
+
+      - name: download ONNX test assets
+        if: steps.cache-onnx.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p onnx-assets
+          curl -sL -o ort.tgz "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}.tgz"
+          tar -xzf ort.tgz "onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}"
+          mv "onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION}" onnx-assets/libonnxruntime.so
+          rm -rf ort.tgz "onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}"
+          curl -sL -o onnx-assets/model_quantized.onnx "https://huggingface.co/AdamCodd/vit-base-nsfw-detector/resolve/main/onnx/model_quantized.onnx"
+
+      - name: gofmt
+        run: |
+          fmt_out="$(gofmt -l .)"
+          if [ -n "$fmt_out" ]; then
+            echo "The following files are not gofmt'd:"
+            echo "$fmt_out"
+            exit 1
+          fi
+
+      - name: vet
+        run: go vet ./cmd/... ./internal/...
+
+      - name: test with per-package coverage gate
+        env:
+          TRIAGENT_TEST_MODEL: ${{ github.workspace }}/onnx-assets/model_quantized.onnx
+          TRIAGENT_TEST_LIB: ${{ github.workspace }}/onnx-assets/libonnxruntime.so
+        run: |
+          exit_code=0
+          for pkg in $(go list ./internal/...); do
+            output="$(go test "$pkg" -race -covermode=atomic 2>&1)"
+            echo "$output"
+            if echo "$output" | grep -q "no test files"; then
+              continue
+            fi
+            if ! echo "$output" | grep -q "^ok"; then
+              exit_code=1
+              continue
+            fi
+
+            pct="$(echo "$output" | grep -oP 'coverage: \K[0-9.]+(?=% of statements)')"
+            floor=100.0
+            # internal/classifier's GPU execution-provider selection
+            # (CUDA/CoreML/DirectML) can only be exercised on matching
+            # hardware, which GitHub-hosted runners don't have; the pure
+            # CPU path and all decision/scoring logic are still 100%.
+            if [[ "$pkg" == */internal/classifier ]]; then
+              floor=70.0
+            fi
+
+            below=$(python3 -c "print(1 if float('$pct') < $floor else 0)")
+            if [ "$below" = "1" ]; then
+              echo "::error::$pkg coverage is ${pct}%, want >= ${floor}%"
+              exit_code=1
+            fi
+          done
+          exit $exit_code
+
+  build:
+    name: build CLI (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: build
+        run: go build -o /dev/null ./cmd/triagent
+        shell: bash
