@@ -17,6 +17,15 @@ var maxCollisionAttempts = 10000
 func resolveDestination(dir, fileName string) (path string, renamed bool, err error) {
 	ext := filepath.Ext(fileName)
 	base := strings.TrimSuffix(fileName, ext)
+	if base == "" {
+		// A dotfile with no further dots (e.g. ".hidden"): filepath.Ext
+		// treats the whole name as the "extension", which would otherwise
+		// rename a collision to "_1.hidden" instead of ".hidden_1". Treat
+		// the full name as the base instead, so the dotfile's identity is
+		// preserved and the suffix lands where a human would expect it.
+		base = fileName
+		ext = ""
+	}
 
 	for n := 0; n <= maxCollisionAttempts; n++ {
 		candidateName := fileName

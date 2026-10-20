@@ -36,6 +36,18 @@ func makeTestVideo(t *testing.T, seconds float64) string {
 	return path
 }
 
+// makeTestVideoAt is like makeTestVideo but writes to a caller-chosen path,
+// for testing unicode/special-character filenames.
+func makeTestVideoAt(t *testing.T, path string, seconds float64) {
+	t.Helper()
+	cmd := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi",
+		"-i", "testsrc=duration="+strconv.FormatFloat(seconds, 'f', -1, 64)+":size=320x240:rate=10",
+		"-y", path)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generate test video: %v: %s", err, out)
+	}
+}
+
 func mustNotExist(t *testing.T) string {
 	t.Helper()
 	return filepath.Join(t.TempDir(), "does-not-exist.mp4")

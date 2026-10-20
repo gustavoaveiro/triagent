@@ -25,6 +25,27 @@ func TestExtractFrame_RealVideo(t *testing.T) {
 	}
 }
 
+func TestExtractFrame_UnicodeAndSpecialCharacterPaths(t *testing.T) {
+	requireFFmpeg(t)
+
+	dir := t.TempDir()
+	videoPath := filepath.Join(dir, `日本語 (2024) [emoji😀] & more.mp4`)
+	makeTestVideoAt(t, videoPath, 2)
+
+	outPath := filepath.Join(dir, `frame output "weird".jpg`)
+	if err := ExtractFrame(videoPath, 500*time.Millisecond, outPath); err != nil {
+		t.Fatalf("ExtractFrame: %v", err)
+	}
+
+	info, err := os.Stat(outPath)
+	if err != nil {
+		t.Fatalf("output frame missing: %v", err)
+	}
+	if info.Size() == 0 {
+		t.Error("output frame is empty")
+	}
+}
+
 func TestExtractFrame_MissingSourceFails(t *testing.T) {
 	requireFFmpeg(t)
 	out := filepath.Join(t.TempDir(), "frame.jpg")

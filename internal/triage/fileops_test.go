@@ -37,6 +37,37 @@ func TestResolveDestination_CollisionRenames(t *testing.T) {
 	}
 }
 
+func TestResolveDestination_DotfileCollisionPreservesName(t *testing.T) {
+	dir := t.TempDir()
+	writePNG(t, filepath.Join(dir, ".hidden"))
+
+	path, renamed, err := resolveDestination(dir, ".hidden")
+	if err != nil {
+		t.Fatalf("resolveDestination: %v", err)
+	}
+	if !renamed {
+		t.Error("renamed = false, want true")
+	}
+	want := filepath.Join(dir, ".hidden_1")
+	if path != want {
+		t.Errorf("path = %q, want %q (not _1.hidden)", path, want)
+	}
+}
+
+func TestResolveDestination_DotfileFreshName(t *testing.T) {
+	dir := t.TempDir()
+	path, renamed, err := resolveDestination(dir, ".hidden")
+	if err != nil {
+		t.Fatalf("resolveDestination: %v", err)
+	}
+	if renamed {
+		t.Error("renamed = true, want false for a fresh name")
+	}
+	if path != filepath.Join(dir, ".hidden") {
+		t.Errorf("path = %q", path)
+	}
+}
+
 func TestResolveDestination_StatErrorPropagates(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("permission bits behave differently on windows")

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"syscall"
 	"testing"
 )
@@ -207,6 +208,49 @@ func TestMatchingPattern(t *testing.T) {
 	// ValidatePatterns is what's responsible for rejecting these upfront.
 	if got := matchingPattern("notes.txt", []string{"["}); got != "" {
 		t.Errorf("matchingPattern with a malformed pattern = %q, want empty", got)
+	}
+}
+
+func TestWalk_FindsUnicodeAndEmojiFilenames(t *testing.T) {
+	root := t.TempDir()
+	names := []string{
+		"日本語のファイル名.png",
+		"emoji😀📸.jpg",
+		"café_naïve.png",
+	}
+	for _, name := range names {
+		mustWriteFile(t, filepath.Join(root, name), "content")
+	}
+
+	entries := drain(t, root, nil)
+	if len(entries) != len(names) {
+		t.Fatalf("got %d entries, want %d: %+v", len(entries), len(names), entries)
+	}
+	found := map[string]bool{}
+	for _, e := range entries {
+		found[filepath.Base(e.Path)] = true
+	}
+	for _, name := range names {
+		if !found[name] {
+			t.Errorf("expected to find %q among walked entries", name)
+		}
+	}
+}
+
+func TestWalk_FindsVeryLongFilename(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has its own (different, often shorter) path length rules")
+	}
+	root := t.TempDir()
+	name := strings.Repeat("a", 251) + ".png" // 255 bytes: the ext4 limit
+	mustWriteFile(t, filepath.Join(root, name), "content")
+
+	entries := drain(t, root, nil)
+	if len(entries) != 1 {
+		t.Fatalf("got %d entries, want 1", len(entries))
+	}
+	if filepath.Base(entries[0].Path) != name {
+		t.Errorf("entry name = %q, want %q", filepath.Base(entries[0].Path), name)
 	}
 }
 

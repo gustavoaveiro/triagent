@@ -21,6 +21,30 @@ func TestDuration_RealVideo(t *testing.T) {
 	}
 }
 
+func TestDuration_UnicodeAndSpecialCharacterPaths(t *testing.T) {
+	requireFFmpeg(t)
+
+	names := []string{
+		"日本語の動画.mp4",
+		"emoji😀clip.mp4",
+		`video (2024) [final] - "copy" & more.mp4`,
+	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), name)
+			makeTestVideoAt(t, path, 2)
+
+			got, err := Duration(path)
+			if err != nil {
+				t.Fatalf("Duration: %v", err)
+			}
+			if math.Abs(got.Seconds()-2) > 0.2 {
+				t.Errorf("Duration = %v, want ~2s", got)
+			}
+		})
+	}
+}
+
 func TestDuration_MissingFileFails(t *testing.T) {
 	requireFFmpeg(t)
 	_, err := Duration(mustNotExist(t))
